@@ -8,6 +8,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/random.h>
 #include "common.h"
 
 #define MAX_PENDING 256
@@ -41,6 +42,58 @@ int makeSocket( int port ) {
 }
 
 
+/* Helper functions of sendRandData() */
+ssize_t fillBufWithRandomBytes(char *buf) {
+  ssize_t numBytesWrittenToBuf;
+
+  numBytesWrittenToBuf = getrandom(buf, BUFF_SIZE, 0);
+  if (numBytesWrittenToBuf < 0) {
+    die("fillBufWithRandomBytes: couldn't write random bytes to the buffer.");
+  }
+  return numBytesWrittenToBuf;
+}
+
+
+/* END -- Helper functions of sendRandData() */
+
+int sendRandData(int to, int numBytesRequested) {
+  char buf[BUFF_SIZE];
+  int s = 0;
+  ssize_t numBytesWrittenToBuf = 0;
+  ssize_t numBytesWrittenToClient = 0;
+
+  numBytesWrittenToBuf = fillBufWithRandomBytes(buf);
+
+/* Pourquoi buffer parfois > 1024 ?? */
+
+  while (numBytesWrittenToClient < numBytesRequested) {
+    if ((numBytesRequested-numBytesWrittenToClient) < (BUFF_SIZE-s)) {
+      printf("Sending random data 1.\n");
+      numBytesWrittenToClient += write(to, buf+s, numBytesRequested-s);
+      if ( numBytesWrittenToClient < 0 ) {
+        die("sendRandData: couldn't write the data to the client. aaa");
+      }
+
+      s += numBytesWrittenToClient;
+    }
+    else if ((numBytesRequested-numBytesWrittenToClient) > (BUFF_SIZE-s)) {
+      printf("Sending random data.\n");
+      numBytesWrittenToClient += write(to, buf+s, BUFF_SIZE-s); /* HERE ?? E_INTR? E_WOULDBLOCK ??*/
+      if ( numBytesWrittenToClient < 0 ) {
+        die("sendRandData: couldn't write the data to the client. bbb ");
+      }
+      s = 0;
+
+      numBytesWrittenToBuf = getrandom(buf, BUFF_SIZE, 0);
+    if (numBytesWrittenToBuf < 0) {
+      die("sendRandData: couldn't write random bytes to the buffer. cccc");
+    }
+    }
+  }
+
+  return numBytesWrittenToClient;
+}
+
 int getClientNumBytes( int clientSock ) {
   int numBytes;
 
@@ -52,26 +105,14 @@ int getClientNumBytes( int clientSock ) {
 }
 
 void handleClient( int clientSock ) {
-  // int file;
-  // int nRead;
   int numBytesRequested;
 
   numBytesRequested = getClientNumBytes(clientSock);
-  sendRandData( 0, clientSock, numBytesRequested );
+  sendRandData( clientSock, numBytesRequested ); // enlever premier argument (inutile ?)
 
-
-  // nRead = read( clientSock, (fullPath+pathLen), MAX_NAME );
-  // if( nRead <= 0 ) {
-  //   die( "WTF? 1" );
-  // }
-  // printf( "Requested file: %s\n", fullPath );
-  // file = open( fullPath, O_RDONLY, 0 );
-  // if( copy( file, clientSock ) < 0 ) {
-  //   perror( "Failed to send the file" );
-  // }
-  // close( file );
   close( clientSock );
 }
+
 
 void run( int serverSock ) {
   while( 1 ) {
