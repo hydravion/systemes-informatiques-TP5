@@ -13,6 +13,106 @@
 
 #define MAX_PENDING 256
 
+
+/* Helper functions to sendRandData() [see below]. */
+
+ssize_t fillBufWithRandomBytes(char *buf) {
+  /* fillBufWithRandomBytes initializes a buffer with random bytes. */
+
+  ssize_t numBytesWrittenToBuf = 0;
+
+  numBytesWrittenToBuf = getrandom(buf, BUFF_SIZE, 0); // suitable for cryptographic purposes
+
+  if (numBytesWrittenToBuf < 0) {
+    die("fillBufWithRandomBytes: couldn't write random bytes to the buffer.");
+  }
+  return numBytesWrittenToBuf;
+}
+
+ssize_t writeBytesToClient(int to, char *buf, ssize_t numBytesToSend) {
+  /* writeBytesToClient writes numBytesToSend bytes to the client. */
+
+  ssize_t numBytesJustSent = 0;
+  numBytesJustSent = write(to, buf, numBytesToSend);
+  printf("\t%ld bytes sent.\n", numBytesJustSent);
+
+  if ( numBytesJustSent < 0 ) {
+    die("sendRandData: couldn't write the data to the client. aaa");
+  }
+
+  return numBytesJustSent;
+}
+/* END -- Helper functions to sendRandData() */
+
+
+ssize_t sendRandData(int to, ssize_t numBytesRequested) {
+  /* sendRandData sends the client the number of bytes requested. */
+
+  char buf[BUFF_SIZE];
+  ssize_t numBytesLeftToSend = numBytesRequested;
+  ssize_t numBytesWrittenToClient = 0;
+  ssize_t numBytesJustWritten = 0;
+
+  fillBufWithRandomBytes(buf); // initialize the buffer with random bytes
+
+  printf("Sending random bytes.\n");
+
+  while (numBytesLeftToSend > 0) {
+    if (numBytesLeftToSend > BUFF_SIZE) { // if you need more than a buffer of bytes
+      numBytesJustWritten = writeBytesToClient(to, buf, BUFF_SIZE); // send a whole one
+      fillBufWithRandomBytes(buf); // and reinitialize it
+    }
+    else { // otherwise only send what you need from the buffer
+      numBytesJustWritten = writeBytesToClient(to, buf, numBytesLeftToSend);
+    }
+    numBytesWrittenToClient += numBytesJustWritten;
+    numBytesLeftToSend -= numBytesJustWritten;
+  }
+
+  return numBytesWrittenToClient;
+}
+
+int getClientNumBytes( int clientSock ) {
+  /* getClientNumBytes gets the number of bytes from the client. */
+
+  int numBytes;
+
+  if( read( clientSock, &numBytes, sizeof(numBytes)) < sizeof(numBytes) ) {
+    perror("getClientNumBytes: couldn't get the number of bytes requested by the client.");
+  }
+
+  return numBytes;
+}
+
+void handleClient( int clientSock ) {
+  /* handleClient gets from the client the number of bytes
+      it requested and then sends it the (same number of) random bytes.*/
+
+  ssize_t numBytesRequested;
+
+  numBytesRequested = getClientNumBytes(clientSock);
+  sendRandData( clientSock, numBytesRequested );
+
+  close( clientSock );
+}
+
+
+void run( int serverSock ) {
+  while( 1 ) {
+    struct sockaddr_in clientAddress;
+    unsigned int clientLength = sizeof(clientAddress);
+    int clientSock;
+    printf( "Waiting for incoming connections\n");
+    clientSock =
+      accept(serverSock, (struct sockaddr *) &clientAddress, &clientLength );
+    if( clientSock < 0 ) {
+      die("Failed to accept client connection");
+    }
+    printf( "Client connected: %s\n", inet_ntoa(clientAddress.sin_addr));
+    handleClient(clientSock);
+  }
+}
+
 void prepare_address( struct sockaddr_in *address,  int port ) {
   size_t addrSize = sizeof( address );
   memset(address, 0, addrSize);
@@ -40,96 +140,6 @@ int makeSocket( int port ) {
   }
   return sock;
 }
-
-
-/* Helper functions of sendRandData() */
-ssize_t fillBufWithRandomBytes(char *buf) {
-  ssize_t numBytesWrittenToBuf;
-
-  numBytesWrittenToBuf = getrandom(buf, BUFF_SIZE, 0);
-  if (numBytesWrittenToBuf < 0) {
-    die("fillBufWithRandomBytes: couldn't write random bytes to the buffer.");
-  }
-  return numBytesWrittenToBuf;
-}
-
-
-/* END -- Helper functions of sendRandData() */
-
-int sendRandData(int to, int numBytesRequested) {
-  char buf[BUFF_SIZE];
-  int s = 0;
-  ssize_t numBytesWrittenToBuf = 0;
-  ssize_t numBytesWrittenToClient = 0;
-
-  numBytesWrittenToBuf = fillBufWithRandomBytes(buf);
-
-/* Pourquoi buffer parfois > 1024 ?? */
-
-  while (numBytesWrittenToClient < numBytesRequested) {
-    if ((numBytesRequested-numBytesWrittenToClient) < (BUFF_SIZE-s)) {
-      printf("Sending random data 1.\n");
-      numBytesWrittenToClient += write(to, buf+s, numBytesRequested-s);
-      if ( numBytesWrittenToClient < 0 ) {
-        die("sendRandData: couldn't write the data to the client. aaa");
-      }
-
-      s += numBytesWrittenToClient;
-    }
-    else if ((numBytesRequested-numBytesWrittenToClient) > (BUFF_SIZE-s)) {
-      printf("Sending random data.\n");
-      numBytesWrittenToClient += write(to, buf+s, BUFF_SIZE-s); /* HERE ?? E_INTR? E_WOULDBLOCK ??*/
-      if ( numBytesWrittenToClient < 0 ) {
-        die("sendRandData: couldn't write the data to the client. bbb ");
-      }
-      s = 0;
-
-      numBytesWrittenToBuf = getrandom(buf, BUFF_SIZE, 0);
-    if (numBytesWrittenToBuf < 0) {
-      die("sendRandData: couldn't write random bytes to the buffer. cccc");
-    }
-    }
-  }
-
-  return numBytesWrittenToClient;
-}
-
-int getClientNumBytes( int clientSock ) {
-  int numBytes;
-
-  if( read( clientSock, &numBytes, sizeof(numBytes)) < sizeof(numBytes) ) {
-    perror("getClientNumBytes: couldn't get the number of bytes requested by the client.");
-  }
-
-  return numBytes;
-}
-
-void handleClient( int clientSock ) {
-  int numBytesRequested;
-
-  numBytesRequested = getClientNumBytes(clientSock);
-  sendRandData( clientSock, numBytesRequested ); // enlever premier argument (inutile ?)
-
-  close( clientSock );
-}
-
-
-void run( int serverSock ) {
-  while( 1 ) {
-    struct sockaddr_in clientAddress;
-    unsigned int clientLength = sizeof(clientAddress);
-    int clientSock;
-    printf( "Waiting for incoming connections\n");
-    clientSock =
-      accept(serverSock, (struct sockaddr *) &clientAddress, &clientLength );
-    if( clientSock < 0 ) {
-      die("Failed to accept client connection");
-    }
-    printf( "Client connected: %s\n", inet_ntoa(clientAddress.sin_addr));
-    handleClient(clientSock);
-  }
-}
-
 
 int main( int argc, char **argv ) {
   int servSock;

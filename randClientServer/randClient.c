@@ -72,10 +72,7 @@ int main(int argc, char *argv[]) {
 
   while( rcvd < numBytes ) {
     n = read( sock, data+rcvd, numBytes-rcvd );
-    if( n < 0 ) {                  /* IMPORTANT !!!! CHECKER errno == EINTR EAGAIN ou EWOULBLOCK pour renvoyer CLIENT
-                                        avec 3000 bytes : sendRandData: couldn't write the data to the client.: Bad address
-                                        avec 300 bytes : boucle infinie dans sendRandData je pense
-                                        utilise strace pour débugger*/
+    if( n < 0 ) {
       die( "Cannot receive data" );
     }
     rcvd += n;
